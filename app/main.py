@@ -2,15 +2,14 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from pathlib import Path
 
-from codepilot.core.state import CoreState
-from codepilot.core.orchestration import (
+from core.state import CoreState
+from core.orchestration import (
     compile_orchestration_graph,
     create_default_sqlite_storage,
 )
 
 app = FastAPI(title="CodePilot API")
 
-# Initialize storage + orchestrator
 storage = create_default_sqlite_storage(Path("memory.db"))
 run_pipeline = compile_orchestration_graph(storage)
 
