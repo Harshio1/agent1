@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 from pydantic import BaseModel, ValidationError
 
-from ..core.models import (
+from core.models import (
     DebugOutput,
     IntentClassificationOutput,
     MemoryContext,
