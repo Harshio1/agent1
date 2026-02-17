@@ -10,6 +10,11 @@ from core.orchestration import (
 
 app = FastAPI(title="CodePilot API")
 
+# ✅ HEALTH CHECK / ROOT ROUTE (THIS FIXES RAILWAY)
+@app.get("/")
+def root():
+    return {"status": "CodePilot API is running"}
+
 storage = create_default_sqlite_storage(Path("memory.db"))
 run_pipeline = compile_orchestration_graph(storage)
 
