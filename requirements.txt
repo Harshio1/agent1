@@ -4,3 +4,4 @@ pydantic
 python-dotenv
 langchain
 langgraph
+openai>=1.12.0
