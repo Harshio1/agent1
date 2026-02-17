@@ -562,4 +562,3 @@ def create_default_sqlite_storage(db_path: str | Path) -> SQLiteMemoryStorage:
     """
     config = SQLiteConfig(db_path=Path(db_path))
     return SQLiteMemoryStorage(config=config)
-
