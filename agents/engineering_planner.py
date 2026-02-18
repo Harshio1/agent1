@@ -282,4 +282,3 @@ def create_default_engineering_planner() -> EngineeringPlannerAgent:
     config = EngineeringPlannerConfig(model=model)
     client = OpenAI()
     return EngineeringPlannerAgent(client=client, config=config)
-
