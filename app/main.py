@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pathlib import Path
+from typing import Optional
 
 from core.state import CoreState
 from core.orchestration import (
@@ -10,38 +11,32 @@ from core.orchestration import (
 
 app = FastAPI(title="CodePilot API")
 
-# These must NOT be initialized at import time
+# These will be initialized at startup
 storage = None
 run_pipeline = None
 
 
 class ProblemRequest(BaseModel):
     problem: str
-    user_id: str | None = None
+    user_id: Optional[str] = None
 
 
 @app.on_event("startup")
 def startup_event():
-    """
-    Runs once when the FastAPI app starts.
-    Keeps Railway startup fast and avoids health-check timeouts.
-    """
     global storage, run_pipeline
 
-    storage = create_default_sqlite_storage(Path("memory.db"))
+    storage = create_default_sqlite_storage(
+        Path("/tmp/memory.db")  # IMPORTANT: writable on Railway
+    )
+
     run_pipeline = compile_orchestration_graph(storage)
-
-
-@app.get("/")
-def root():
-    """
-    Health check endpoint for Railway
-    """
-    return {"status": "CodePilot API is running"}
 
 
 @app.post("/solve")
 def solve_problem(request: ProblemRequest):
+    if run_pipeline is None:
+        return {"error": "Pipeline not initialized"}
+
     state = CoreState(
         state_version="1.0",
         request_id="web_request",
