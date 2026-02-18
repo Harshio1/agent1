@@ -11,7 +11,6 @@ from core.orchestration import (
 
 app = FastAPI(title="CodePilot API")
 
-# These will be initialized at startup
 storage = None
 run_pipeline = None
 
@@ -26,10 +25,15 @@ def startup_event():
     global storage, run_pipeline
 
     storage = create_default_sqlite_storage(
-        Path("/tmp/memory.db")  # IMPORTANT: writable on Railway
+        Path("/tmp/memory.db")  # Railway-safe path
     )
 
     run_pipeline = compile_orchestration_graph(storage)
+
+
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
 
 
 @app.post("/solve")
