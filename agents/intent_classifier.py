@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from openai import OpenAI
+from groq import Groq
 from pydantic import ValidationError
 
 from core.models import (
@@ -23,31 +23,21 @@ from core.models import (
 class IntentClassifierConfig:
     """
     Configuration for the LLM-backed IntentClassifierAgent.
-
-    Attributes:
-        model: Name of the chat completion model to use.
-        max_retries: Number of attempts to obtain a valid, parseable response.
-        temperature: Sampling temperature for the model.
     """
 
-    model: str = "gpt-4.1-mini"
+    model: str = "llama3-8b-8192"
     max_retries: int = 2
     temperature: float = 0.0
 
 
 class IntentClassifierAgent:
     """
-    LLM-backed intent classifier.
-
-    Responsibilities:
-      - Consume only raw_problem_input and memory_context.
-      - Produce a validated IntentClassificationOutput.
-      - Enforce strict JSON-only responses and robustly handle malformed output.
+    LLM-backed intent classifier using Groq.
     """
 
     def __init__(
         self,
-        client: OpenAI,
+        client: Groq,
         config: Optional[IntentClassifierConfig] = None,
     ) -> None:
         self._client = client
@@ -58,29 +48,19 @@ class IntentClassifierAgent:
         raw_problem_input: str,
         memory_context: Optional[MemoryContext],
     ) -> IntentClassificationOutput:
-        """
-        Classify the user's problem using the configured LLM.
-
-        This method attempts multiple times to obtain a valid JSON object that
-        conforms to IntentClassificationOutput. If validation repeatedly fails,
-        a safe heuristic fallback is used.
-        """
         context_hint = self._build_memory_hint(memory_context)
 
         last_error: Optional[Exception] = None
-        for attempt in range(self._config.max_retries + 1):
+        for _ in range(self._config.max_retries + 1):
             try:
                 raw_json = self._invoke_llm(raw_problem_input, context_hint)
                 parsed = IntentClassificationOutput.model_validate(raw_json)
-                # Preserve the full raw JSON for traceability.
                 parsed.raw_json = raw_json
                 return parsed
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as exc:
                 last_error = exc
-                # On retry, the prompt will be slightly different to emphasize format.
                 continue
 
-        # Fallback to heuristic classification if LLM output cannot be validated.
         return self._heuristic_fallback(raw_problem_input, memory_context, last_error)
 
     def _build_memory_hint(self, memory_context: Optional[MemoryContext]) -> str:
@@ -99,20 +79,14 @@ class IntentClassifierAgent:
         )
 
     def _invoke_llm(self, problem_input: str, memory_hint: str) -> dict[str, Any]:
-        """
-        Call the underlying LLM and return a parsed JSON object.
-
-        Any JSON/validation issues are raised to the caller.
-        """
         system_prompt = (
             "You are an intent classification engine for a software engineering "
             "assistant called CodePilot.\n\n"
-            "Your ONLY job is to read the user's programming problem and output a "
-            "STRICT JSON object matching this schema (no prose, no markdown):\n\n"
+            "Output ONLY a strict JSON object matching this schema:\n\n"
             "{\n"
             '  "problem_type": one of ["dsa", "system", "bug_fix", "optimization", "other"],\n'
             '  "context": one of ["interview", "production", "learning", "experimental", "unknown"],\n'
-            '  "languages": [list of language names as lowercase strings],\n'
+            '  "languages": [list of lowercase language strings],\n'
             '  "constraints": {\n'
             '    "time_complexity_target": string or null,\n'
             '    "space_complexity_target": string or null,\n'
@@ -126,14 +100,13 @@ class IntentClassifierAgent:
             "  },\n"
             '  "confidence": number between 0 and 1\n'
             "}\n\n"
-            "Output ONLY the JSON object. Do not include explanations, comments, or "
-            "any text before or after the JSON."
+            "Return ONLY valid JSON."
         )
 
         user_prompt = (
             f"{memory_hint}\n\n"
             "User problem description:\n"
-            f"{problem_input}\n"
+            f"{problem_input}"
         )
 
         response = self._client.chat.completions.create(
@@ -146,12 +119,10 @@ class IntentClassifierAgent:
         )
 
         content = response.choices[0].message.content
-        if content is None:
-            raise ValueError("LLM returned empty content for intent classification.")
+        if not content:
+            raise ValueError("LLM returned empty content.")
 
-        # The model is instructed to output pure JSON. We still defensively strip.
-        content = content.strip()
-        return json.loads(content)
+        return json.loads(content.strip())
 
     def _heuristic_fallback(
         self,
@@ -159,12 +130,9 @@ class IntentClassifierAgent:
         memory_context: Optional[MemoryContext],
         error: Optional[Exception],
     ) -> IntentClassificationOutput:
-        """
-        Heuristic classification used only when the LLM path fails.
-        """
         text = raw_problem_input.lower()
 
-        if "optimize" in text or "optimization" in text:
+        if "optimize" in text:
             problem_type = ProblemType.OPTIMIZATION
         elif "bug" in text or "fix" in text:
             problem_type = ProblemType.BUG_FIX
@@ -173,12 +141,13 @@ class IntentClassifierAgent:
         else:
             problem_type = ProblemType.DSA
 
-        if "interview" in text:
-            context = ProblemContext.INTERVIEW
-        elif "production" in text:
-            context = ProblemContext.PRODUCTION
-        else:
-            context = ProblemContext.UNKNOWN
+        context = (
+            ProblemContext.INTERVIEW
+            if "interview" in text
+            else ProblemContext.PRODUCTION
+            if "production" in text
+            else ProblemContext.UNKNOWN
+        )
 
         preferred_style = (
             memory_context.preferred_style_mode
@@ -202,23 +171,13 @@ class IntentClassifierAgent:
                 style_mode=preferred_style,
             ),
             confidence=0.4,
-            raw_json={
-                "fallback": True,
-                "error": str(error) if error else None,
-            },
+            raw_json={"fallback": True, "error": str(error)},
         )
 
 
 def create_default_intent_classifier() -> IntentClassifierAgent:
-    """
-    Convenience factory that builds an IntentClassifierAgent using environment
-    variables for configuration.
-
-    Environment variables:
-      - CODEPILOT_INTENT_MODEL: override default model name.
-    """
-    model = os.getenv("CODEPILOT_INTENT_MODEL", IntentClassifierConfig.model)
+    model = os.getenv("CODEPILOT_INTENT_MODEL", "llama3-8b-8192")
     config = IntentClassifierConfig(model=model)
-    client = OpenAI()
-    return IntentClassifierAgent(client=client, config=config)
 
+    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    return IntentClassifierAgent(client=client, config=config)
