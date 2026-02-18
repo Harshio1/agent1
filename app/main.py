@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from pathlib import Path
+from typing import Optional
 
 from core.state import CoreState
 from core.orchestration import (
@@ -10,33 +11,33 @@ from core.orchestration import (
 
 app = FastAPI(title="CodePilot API")
 
-# Globals (initialized on startup)
-run_pipeline = None
-
-
 # ---------- HEALTH CHECK ----------
 @app.get("/")
 def root():
     return {"status": "ok", "service": "CodePilot API"}
 
 
-# ---------- STARTUP HOOK (CRITICAL FIX) ----------
-@app.on_event("startup")
-def startup_event():
-    global run_pipeline
-    storage = create_default_sqlite_storage(Path("memory.db"))
-    run_pipeline = compile_orchestration_graph(storage)
-
-
+# ---------- REQUEST MODEL ----------
 class ProblemRequest(BaseModel):
     problem: str
-    user_id: str | None = None
+    user_id: Optional[str] = None
 
 
+# ---------- LAZY PIPELINE ----------
+_pipeline = None
+
+def get_pipeline():
+    global _pipeline
+    if _pipeline is None:
+        storage = create_default_sqlite_storage(Path("memory.db"))
+        _pipeline = compile_orchestration_graph(storage)
+    return _pipeline
+
+
+# ---------- SOLVE ----------
 @app.post("/solve")
 def solve_problem(request: ProblemRequest):
-    if run_pipeline is None:
-        return {"error": "Service not ready"}
+    run_pipeline = get_pipeline()
 
     state = CoreState(
         state_version="1.0",
