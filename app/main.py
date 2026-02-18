@@ -10,16 +10,22 @@ from core.orchestration import (
 
 app = FastAPI(title="CodePilot API")
 
+# Globals (initialized on startup)
+run_pipeline = None
 
-# ---------- HEALTH CHECK (CRITICAL) ----------
+
+# ---------- HEALTH CHECK ----------
 @app.get("/")
 def root():
     return {"status": "ok", "service": "CodePilot API"}
 
 
-# ---------- PIPELINE SETUP ----------
-storage = create_default_sqlite_storage(Path("memory.db"))
-run_pipeline = compile_orchestration_graph(storage)
+# ---------- STARTUP HOOK (CRITICAL FIX) ----------
+@app.on_event("startup")
+def startup_event():
+    global run_pipeline
+    storage = create_default_sqlite_storage(Path("memory.db"))
+    run_pipeline = compile_orchestration_graph(storage)
 
 
 class ProblemRequest(BaseModel):
@@ -29,6 +35,9 @@ class ProblemRequest(BaseModel):
 
 @app.post("/solve")
 def solve_problem(request: ProblemRequest):
+    if run_pipeline is None:
+        return {"error": "Service not ready"}
+
     state = CoreState(
         state_version="1.0",
         request_id="web_request",
